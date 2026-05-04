@@ -1,3 +1,8 @@
+cancel_email.txt
+email_logs.txt
+message_logs.txt
+secrets.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
