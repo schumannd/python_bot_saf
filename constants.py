@@ -1,4 +1,6 @@
 # --- TELEGRAM SETTINGS ---
+import os
+
 ADMIN_IDS = [
     13025101, # Davi
     5682098430 # Saf
@@ -19,4 +21,15 @@ DEBUG_MODE = False
 STATUS_FILE = "/home/schumannd/tg_bot_saf/cancel_email.txt"
 LOG_FILE = "/home/schumannd/tg_bot_saf/email_logs.txt"
 MESSAGE_LOG_FILE = "/home/schumannd/tg_bot_saf/message_logs.txt"
+
+
+def ensure_runtime_files():
+    """Create STATUS / logs if missing so cron + Flask never die on first read."""
+    if not os.path.isfile(STATUS_FILE):
+        with open(STATUS_FILE, "w") as f:
+            f.write("NO")
+    if not os.path.isfile(LOG_FILE):
+        open(LOG_FILE, "a").close()
+    if not os.path.isfile(MESSAGE_LOG_FILE):
+        open(MESSAGE_LOG_FILE, "a").close()
 

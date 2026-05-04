@@ -9,156 +9,193 @@ import constants
 import secrets
 
 BERLIN = ZoneInfo("Europe/Berlin")
-# Cron can stay at a fixed UTC time (e.g. 05:30); we align behavior with Europe/Berlin.
+# Cron runs at fixed UTC (e.g. 05:30); waits below align sends with Europe/Berlin local morning.
 FLOW_START_HOUR = 7
 FLOW_START_MINUTE = 20
 FLOW_LATE_CUTOFF_HOUR = 7
 FLOW_LATE_CUTOFF_MINUTE = 55
+COUNTDOWN_SECONDS = 600
+
+PA_PROXY = {"http": "http://proxy.server:3128", "https": "http://proxy.server:3128"}
+
+WEEKDAY_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+LIVE_RECIPIENT = {
+    1: constants.LIVE_RECIPIENT_TUESDAY,
+    2: constants.LIVE_RECIPIENT_WEDNESDAY,
+}
 
 
-def log_line(log_entry):
-    timestamp = datetime.now(BERLIN).strftime("%Y-%m-%d %H:%M:%S %Z")
+def log_line(entry):
+    ts = datetime.now(BERLIN).strftime("%Y-%m-%d %H:%M:%S %Z")
     with open(constants.LOG_FILE, "a") as f:
-        f.write(f"[{timestamp}] {log_entry}\n")
+        f.write(f"[{ts}] {entry}\n")
 
 
-def send_msg(msg, tg_user_id):
-    proxies = {
-        "http": "http://proxy.server:3128",
-        "https": "http://proxy.server:3128",
-    }
+def read_status():
+    with open(constants.STATUS_FILE) as f:
+        return f.read().strip()
+
+
+def write_status(value):
+    with open(constants.STATUS_FILE, "w") as f:
+        f.write(value)
+
+
+def send_msg(chat_id, text):
     url = f"https://api.telegram.org/bot{secrets.TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": tg_user_id, "text": msg}
     try:
-        response = requests.post(url, json=payload, proxies=proxies, timeout=10)
-        print(
-            f"DEBUG: Sent message: {msg} \nto {tg_user_id}. Status: {response.status_code}, Response: {response.text}"
+        r = requests.post(
+            url, json={"chat_id": chat_id, "text": text}, proxies=PA_PROXY, timeout=10
         )
+        print(f"DEBUG: TG to {chat_id} status={r.status_code} body={r.text}")
     except Exception as e:
-        print(f"DEBUG: Critical Error sending TG: {e}")
+        print(f"DEBUG: TG error to {chat_id}: {e}")
 
 
-def send_tg(msg, tg_user_id=None):
-    if tg_user_id:
-        send_msg(msg, tg_user_id)
-
+def send_tg(text, also_chat_id=None):
+    if also_chat_id is not None:
+        send_msg(also_chat_id, text)
     for admin_id in constants.ADMIN_IDS:
-        send_msg(msg, admin_id)
+        send_msg(admin_id, text)
 
 
-def live_recipient_for_weekday(weekday):
-    if weekday == 1:
-        return constants.LIVE_RECIPIENT_TUESDAY
-    if weekday == 2:
-        return constants.LIVE_RECIPIENT_WEDNESDAY
-    return None
-
-
-def send_email(recipient):
-    msg = MIMEText(
+def send_email(to_addr):
+    body = MIMEText(
         "Guten Morgen,\n\n"
-        "ich melde mich heute ab — ich komme gar nicht.\n"
-        "Abmeldung / not coming at all.\n\n"
-        "LG Sofia"
+        "ich schaffe es heute leider nicht mehr zu kommen.\n\n"
+        "Viele Grüße, Sofia"
     )
-    msg["Subject"] = "Abmeldung"
-    msg["From"] = constants.GMAIL_USER
-    msg["To"] = recipient
+    body["Subject"] = "Abmeldung"
+    body["From"] = constants.GMAIL_USER
+    body["To"] = to_addr
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(constants.GMAIL_USER, secrets.GMAIL_PASSWORD)
-            server.send_message(msg)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(constants.GMAIL_USER, secrets.GMAIL_PASSWORD)
+            s.send_message(body)
+        write_status("NO")
         return True
     except Exception as e:
         send_tg(f"⚠️ Email Error: {e}")
         return False
 
 
-def weekday_label(weekday):
-    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekday]
-
-
-def sleep_until_flow_start(now_berlin):
-    start = now_berlin.replace(
+def flow_start_dt(now):
+    return now.replace(
         hour=FLOW_START_HOUR, minute=FLOW_START_MINUTE, second=0, microsecond=0
     )
-    if now_berlin >= start:
+
+
+def sleep_until_flow_start(now):
+    start = flow_start_dt(now)
+    hhmm = f"{FLOW_START_HOUR:02d}:{FLOW_START_MINUTE:02d}"
+    if now >= start:
+        log_line(
+            f"Flow-start sleep: 0s (past {hhmm} Berlin; now {now:%Y-%m-%d %H:%M:%S %Z})."
+        )
         return datetime.now(BERLIN)
-    delay = (start - now_berlin).total_seconds()
-    if delay > 0:
-        time.sleep(delay)
-    return datetime.now(BERLIN)
-
-
-def is_past_late_cutoff(now_berlin):
-    cutoff = now_berlin.replace(
-        hour=FLOW_LATE_CUTOFF_HOUR, minute=FLOW_LATE_CUTOFF_MINUTE, second=0, microsecond=0
+    delay = start - now
+    secs = delay.total_seconds()
+    log_line(
+        f"Flow-start sleep: {secs:.0f}s (~{secs / 60:.2f} min) until {start:%H:%M} Berlin "
+        f"(started {now:%Y-%m-%d %H:%M:%S %Z})."
     )
-    return now_berlin > cutoff
+    time.sleep(secs)
+    woke = datetime.now(BERLIN)
+    log_line(f"Flow-start sleep: done ({secs:.0f}s); now {woke:%Y-%m-%d %H:%M:%S %Z}.")
+    return woke
 
 
-def run_for_weekday(weekday):
+def is_past_late_cutoff(now):
+    cutoff = now.replace(
+        hour=FLOW_LATE_CUTOFF_HOUR,
+        minute=FLOW_LATE_CUTOFF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    return now > cutoff
+
+
+def stop_abort_after_countdown(day):
+    """If user cancelled via Telegram (YES): clear NO, notify, return True (= do not send)."""
+    if read_status() != "YES":
+        return False
+    msg = f"🛑 'Stop' received during countdown. Email NOT sent ({day})."
+    log_line(msg)
+    send_tg(msg)
+    write_status("NO")
+    return True
+
+
+def run_send_flow(weekday):
     recipient = (
         constants.DEBUG_RECIPIENT
         if constants.DEBUG_MODE
-        else live_recipient_for_weekday(weekday)
+        else LIVE_RECIPIENT[weekday]
     )
 
-    with open(constants.STATUS_FILE, "r") as f:
-        status = f.read().strip()
+    day = WEEKDAY_SHORT[weekday]
 
-    day = weekday_label(weekday)
-
-    if status == "YES":
-        precancel_log = f"Pre-cancelled: Skipping {day} run entirely."
-        log_line(precancel_log)
-        with open(constants.STATUS_FILE, "w") as f:
-            f.write("NO")
-        send_msg(precancel_log, constants.DEBUG_ID)
+    if read_status() == "YES":
+        line = f"Pre-cancelled: Skipping {day} run entirely."
+        log_line(line)
+        write_status("NO")
+        send_msg(constants.DEBUG_ID, line)
         return
 
-    send_at = (datetime.now(BERLIN) + timedelta(minutes=10)).strftime("%H:%M")
+    send_at = datetime.now(BERLIN) + timedelta(seconds=COUNTDOWN_SECONDS)
     send_tg(
-        f"🔔 10-MINUTE WARNING: Abmeldung email sending at {send_at} Berlin. Send 'stop' now to cancel."
+        f"🔔 10-MINUTE WARNING: Abmeldung email sending at {send_at:%H:%M} Berlin. "
+        "Send 'stop' now to cancel."
     )
 
-    time.sleep(600)
+    time.sleep(COUNTDOWN_SECONDS)
 
-    with open(constants.STATUS_FILE, "r") as f:
-        if f.read().strip() == "YES":
-            stop_log = f"🛑 'Stop' received during countdown. Email NOT sent ({day})."
-            log_line(stop_log)
-            send_tg(stop_log)
-            with open(constants.STATUS_FILE, "w") as f:
-                f.write("NO")
-            return
+    if stop_abort_after_countdown(day):
+        return
+
+    berlin_now = datetime.now(BERLIN)
+    if is_past_late_cutoff(berlin_now):
+        line = (
+            f"Late cutoff after countdown ({berlin_now:%Y-%m-%d %H:%M:%S %Z}); no send ({day})."
+        )
+        log_line(line)
+        cutoff_hm = f"{FLOW_LATE_CUTOFF_HOUR:02d}:{FLOW_LATE_CUTOFF_MINUTE:02d}"
+        send_tg(
+            f"⏭️ Kein Versand ({day}): nach Wartezeit später als {cutoff_hm} Berlin."
+        )
+        return
+
+    if stop_abort_after_countdown(day):
+        return
 
     if send_email(recipient):
-        success_log = f"✅ Abmeldung email sent ({day})."
-        log_line(success_log)
-        send_tg(success_log)
-        with open(constants.STATUS_FILE, "w") as f:
-            f.write("NO")
+        ok = f"✅ Abmeldung email sent ({day})."
+        log_line(ok)
+        send_tg(ok)
 
 
 def main():
-    now_berlin = datetime.now(BERLIN)
-    weekday = now_berlin.weekday()
+    constants.ensure_runtime_files()
 
-    if weekday not in (1, 2):
+    now = datetime.now(BERLIN)
+    wd = now.weekday()
+    if wd not in LIVE_RECIPIENT:
         return
 
-    if is_past_late_cutoff(now_berlin):
-        log_line(f"Start after {FLOW_LATE_CUTOFF_HOUR:02d}:{FLOW_LATE_CUTOFF_MINUTE:02d} Berlin; skipping.")
+    if is_past_late_cutoff(now):
+        log_line(
+            f"Start after {FLOW_LATE_CUTOFF_HOUR:02d}:{FLOW_LATE_CUTOFF_MINUTE:02d} Berlin; skipping."
+        )
         return
 
-    now_berlin = sleep_until_flow_start(now_berlin)
-    if is_past_late_cutoff(now_berlin):
-        log_line("Passed late cutoff after wait; skipping.")
+    now = sleep_until_flow_start(now)
+    if is_past_late_cutoff(now):
+        log_line("Passed late cutoff after flow-start sleep; skipping.")
         return
 
-    run_for_weekday(weekday)
+    run_send_flow(wd)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,9 @@ import constants
 import secrets
 from datetime import datetime
 
+constants.ensure_runtime_files()
+
+
 def log_message(log_entry):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(constants.MESSAGE_LOG_FILE, "a") as f:
@@ -21,11 +24,13 @@ def webhook():
     # Mandatory Proxy for Free Tier
     proxies = {'http': 'http://proxy.server:3128', 'https': 'http://proxy.server:3128'}
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data or "message" not in data:
         return "OK", 200
 
     msg_obj = data["message"]
+    if "from" not in msg_obj:
+        return "OK", 200
     user_id = msg_obj["from"]["id"]
     text = msg_obj.get("text", "").lower()
 
