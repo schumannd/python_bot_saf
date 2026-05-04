@@ -42,17 +42,17 @@ def webhook():
                 log_content = f.read().strip()
             reply = (
                 f"📊 Debug Info:\n\n"
-                f"Email Sending Cancelled this week: {email_status}\n\n"
+                f"Coming email cancelled (YES=skip next send): {email_status}\n\n"
                 f"Email history debug log:\n{log_content}"
             )
         elif "stop" in text.lower():
             with open(constants.STATUS_FILE, "w") as f:
                 f.write("YES")
-            reply = "🛑 STOP RECEIVED. Email cancelled."
+            reply = "🛑 STOP RECEIVED. Next Abmeldung email cancelled."
         elif "reset" in text:
             with open(constants.STATUS_FILE, "w") as f:
                 f.write("NO")
-            reply = "🔄 RESET RECEIVED. Email active."
+            reply = "🔄 RESET RECEIVED. Next email will send unless you stop again."
         else:
             reply = "I'm listening. Try 'info', 'stop' or 'reset'."
     else:
