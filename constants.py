@@ -11,7 +11,7 @@ DEBUG_ID = 13025101 # Davi
 GMAIL_USER = "sofia.fralova@gmail.com"
 
 LIVE_RECIPIENT_TUESDAY = "samia.shakra@elisabethstift.berlin"
-LIVE_RECIPIENT_WEDNESDAY = "second.recipient@elisabethstift.berlin"  # replace with the real Wednesday address
+LIVE_RECIPIENT_WEDNESDAY = "aline.theobald@elisabethstift.berlin"  # replace with the real Wednesday address
 DEBUG_RECIPIENT = "dnstra@gmail.com"
 
 DEBUG_MODE = False
